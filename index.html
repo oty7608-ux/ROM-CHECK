@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Smart PT ROM Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  
+  <style>
+    body { font-family: sans-serif; margin: 0; background-color: #000; color: #fff; overflow: hidden; }
+    #login_screen, #menu_screen { position: fixed; width: 100vw; height: 100vh; background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+    #menu_screen { display: none; }
+    .btn { background: #444; color: #fff; padding: 20px 40px; margin: 10px; border-radius: 10px; border: none; font-size: 1.2rem; cursor: pointer; width: 80%; }
+    .google-btn { background: #fff; color: #000; font-weight: bold; }
+
+    #measure_screen { display: none; width: 100vw; height: 100vh; position: relative; }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+    
+    #overlay_ui { position: absolute; top: 0; left: 0; width: 100%; padding: 20px; box-sizing: border-box; pointer-events: none; }
+    #angle_display { font-size: 80px; color: rgba(0, 255, 0, 0.7); font-weight: bold; text-align: right; }
+    #part_name { font-size: 24px; color: rgba(255, 255, 255, 0.5); }
+    
+    .back-btn { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.2); color: #fff; border: none; padding: 15px 30px; border-radius: 30px; pointer-events: auto; }
+  </style>
+</head>
+<body>
+
+  <div id="login_screen">
+    <h2>AI ROM Analyzer</h2>
+    <button class="btn google-btn" onclick="goToMenu()">Google 계정으로 시작하기</button>
+  </div>
+
+  <div id="menu_screen">
+    <h3>측정 부위 선택</h3>
+    <button class="btn" onclick="start('shoulder')">Shoulder Flexion</button>
+    <button class="btn" onclick="start('knee')">Knee Flexion</button>
+    <button class="btn" onclick="start('elbow')">Elbow Flexion</button>
+  </div>
+
+  <div id="measure_screen">
+    <video id="input_video" style="display:none;" playsinline></video>
+    <canvas id="output_canvas"></canvas>
+    <div id="overlay_ui">
+      <div id="part_name">준비됨</div>
+      <div id="angle_display">0°</div>
+    </div>
+    <button class="back-btn" onclick="location.reload()">처음으로</button>
+  </div>
+
+<script type="module">
+  const videoElement = document.getElementById('input_video');
+  const canvasElement = document.getElementById('output_canvas');
+  const canvasCtx = canvasElement.getContext('2d');
+  
+  let mode = "";
+
+  window.goToMenu = () => {
+    document.getElementById('login_screen').style.display = 'none';
+    document.getElementById('menu_screen').style.display = 'flex';
+  };
+
+  window.start = (part) => {
+    mode = part;
+    document.getElementById('part_name').innerText = part.toUpperCase();
+    document.getElementById('menu_screen').style.display = 'none';
+    document.getElementById('measure_screen').style.display = 'block';
+    camera.start();
+  };
+
+  function getAngle(p1, p2, p3) {
+    const r = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
+    let a = Math.abs(r * 180 / Math.PI);
+    return a > 180 ? 360 - a : Math.round(a);
+  }
+
+  function onResults(results) {
+    canvasElement.width = window.innerWidth;
+    canvasElement.height = window.innerHeight;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.poseLandmarks) {
+      const lm = results.poseLandmarks;
+      let p1, p2, p3;
+      
+      // 오른쪽 기준 (옆모습 측정이 기본이므로)
+      if (mode === 'shoulder') { p1 = lm[24]; p2 = lm[12]; p3 = lm[14]; }
+      else if (mode === 'knee') { p1 = lm[24]; p2 = lm[26]; p3 = lm[28]; }
+      else if (mode === 'elbow') { p1 = lm[12]; p2 = lm[14]; p3 = lm[16]; }
+
+      if (p1 && p2 && p3) {
+        const angle = getAngle(p1, p2, p3);
+        document.getElementById('angle_display').innerText = `${angle}°`;
+
+        // 해부학적 점선 각도기 그리기 (희미하게)
+        canvasCtx.setLineDash([5, 5]); // 점선 설정
+        canvasCtx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+        canvasCtx.lineWidth = 2;
+        
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+        canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+        canvasCtx.lineTo(p3.x * canvasElement.width, p3.y * canvasElement.height);
+        canvasCtx.stroke();
+
+        // 관절 위치에 아주 작은 점
+        [p1, p2, p3].forEach(p => {
+          canvasCtx.beginPath();
+          canvasCtx.arc(p.x * canvasElement.width, p.y * canvasElement.height, 4, 0, 2 * Math.PI);
+          canvasCtx.fillStyle = "rgba(0, 255, 0, 0.5)";
+          canvasCtx.fill();
+        });
+      }
+    }
+    canvasCtx.restore();
+  }
+
+  const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+  pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+  pose.onResults(onResults);
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => { await pose.send({image: videoElement}); },
+    // 후면 카메라 우선 순위 설정 (facingMode: environment)
+    facingMode: 'environment',
+    width: 1280, height: 720
+  });
+</script>
+</body>
+</html>
