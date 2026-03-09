@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>PT ROM Test</title>
+  
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  
+  <style>
+    :root { 
+      --safe-top: env(safe-area-inset-top, 20px); 
+      --safe-bottom: env(safe-area-inset-bottom, 20px); 
+      --primary: #00ff00; 
+      --dit-blue: #004a98;
+      --bg-dark: #111111;
+    }
+
+    /* 전 기종 반응형 레이아웃 최적화 */
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background: #000; color: #fff; overflow: hidden; height: 100dvh; width: 100vw; position: fixed; }
+    
+    .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; z-index: 100; padding: var(--safe-top) 5% var(--safe-bottom); background: var(--bg-dark); overflow-y: auto; }
+    
+    /* 타이틀 디자인 */
+    .main-title { font-size: clamp(2rem, 10vw, 3rem); font-weight: 900; margin-bottom: 30px; letter-spacing: -2px; text-align: center; color: #fff; }
+
+    /* 메뉴 및 입력창 */
+    #menu_screen { display: none; padding-top: calc(var(--safe-top) + 20px); }
+    .welcome-msg { color: var(--primary); font-size: 1.5rem; font-weight: bold; margin-bottom: 25px; width: 100%; max-width: 450px; text-align: left; }
+    
+    .input-group { width: 100%; max-width: 450px; margin-bottom: 20px; }
+    .input-group label { font-size: 0.85rem; color: #888; display: block; margin-bottom: 8px; }
+    .height-input { width: 100%; padding: 16px; border-radius: 12px; border: 1px solid #333; background: #222; color: #fff; font-size: 1.1rem; outline: none; }
+
+    /* 버튼 시스템 */
+    .btn { background: var(--dit-blue); color: #fff; padding: clamp(16px, 4vh, 20px); margin: 6px 0; border-radius: 18px; border: none; font-size: 1.1rem; width: 100%; max-width: 450px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+    .btn:active { transform: scale(0.97); opacity: 0.9; }
+    
+    .category-title { color: #666; font-size: 0.8rem; margin: 25px 0 8px 0; width: 100%; max-width: 450px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #222; padding-bottom: 5px; letter-spacing: 1px; }
+
+    /* 측정 인터페이스 */
+    #measure_screen { display: none; width: 100vw; height: 100dvh; position: relative; background: #000; }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+    
+    #overlay_ui { position: absolute; top: var(--safe-top); right: 5%; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+    #angle_display { font-size: clamp(70px, 18vw, 100px); color: var(--primary); font-weight: 900; text-shadow: 2px 2px 25px #000; }
+    #status_badge { font-size: 18px; font-weight: bold; margin-top: 10px; padding: 10px 20px; border-radius: 12px; background: rgba(0,0,0,0.85); min-width: 150px; text-align: center; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(10px); }
+    #ref_info { font-size: 14px; color: #aaa; margin-top: 8px; background: rgba(0,0,0,0.5); padding: 5px 12px; border-radius: 8px; }
+
+    /* 하단 도구 바 (반응형 그리드) */
+    #control_bar { position: absolute; bottom: calc(var(--safe-bottom) + 10px); width: 100%; display: flex; justify-content: center; gap: 8px; padding: 0 10px; flex-wrap: wrap; }
+    .tool-btn { flex: 1 1 20%; max-width: 100px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 15px 5px; border-radius: 20px; backdrop-filter: blur(15px); font-size: 11px; font-weight: bold; }
+
+    /* 운동 목록 슬라이드 서랍 */
+    #drawer { position: fixed; bottom: 0; left: 0; width: 100%; background: #1a1a1a; border-radius: 25px 25px 0 0; padding: 30px 20px var(--safe-bottom); transform: translateY(100%); transition: 0.5s cubic-bezier(0.19, 1, 0.22, 1); z-index: 200; max-height: 75vh; overflow-y: auto; }
+    .v-card { background: #262626; margin-bottom: 15px; padding: 15px; border-radius: 15px; display: flex; align-items: center; border: 1px solid #333; }
+    .v-card img { width: 85px; border-radius: 8px; margin-right: 18px; }
+  </style>
+</head>
+<body>
+
+  <div id="login_screen" class="screen" style="justify-content: center;">
+    <h1 class="main-title">PT ROM Test</h1>
+    <div id="g_id_onload" data-client_id="534435432285-5p1cs4c0hufivp300eahdnf7fs15i1pa.apps.googleusercontent.com" data-callback="onLogin"></div>
+    <div class="g_id_signin" data-type="standard"></div>
+    <button class="btn" style="background:#444; margin-top:25px;" onclick="showMenu()">Guest Start</button>
+  </div>
+
+  <div id="menu_screen" class="screen">
+    <h3 class="welcome-msg">환영합니다!</h3>
+    
+    <div class="input-group">
+      <label>측정자 키 입력 (cm) - 시차 오차 보정용</label>
+      <input type="number" id="user_height" class="height-input" value="175">
+    </div>
+
+    <div class="category-title">Spine & Upper Body</div>
+    <button class="btn" onclick="startEngine('neck')">Neck Flexion/Extension</button>
+    <button class="btn" onclick="startEngine('trunk')">Trunk Flexion/Extension</button>
+    <button class="btn" onclick="startEngine('shoulder_fe')">Shoulder Flex/Ext</button>
+    <button class="btn" onclick="startEngine('shoulder_abd')">Shoulder Abd/Add</button>
+    <button class="btn" onclick="startEngine('shoulder_horiz')">Shoulder Horizontal</button>
+
+    <div class="category-title">Lower Body (하지)</div>
+    <button class="btn" style="background:#e67e22;" onclick="startEngine('hip_abd')">Hip Abduction/Adduction</button>
+    <button class="btn" onclick="startEngine('hip_fe')">Hip Flex/Ext</button>
+    <button class="btn" onclick="startEngine('knee_fe')">Knee Flex/Ext</button>
+    <button class="btn" onclick="startEngine('ankle')">Ankle DF/PF</button>
+    
+    <button class="btn" style="background:#555; margin-top:30px; margin-bottom: 60px;" onclick="location.reload()">Reset App</button>
+  </div>
+
+  <div id="measure_screen">
+    <video id="input_video" style="display:none;" playsinline></video>
+    <canvas id="output_canvas"></canvas>
+    
+    <div id="overlay_ui">
+      <div id="angle_display">0°</div>
+      <div id="status_badge">Measuring...</div>
+      <div id="ref_info">Normal: --</div>
+    </div>
+
+    <div id="control_bar">
+      <button class="tool-btn" style="background:#e67e22;" onclick="resetAngle()">📐 Reset</button>
+      <button class="tool-btn" onclick="flipCamera()">🔄 전환</button>
+      <button class="tool-btn" onclick="toggleDrawer()">📺 운동</button>
+      <button class="tool-btn" onclick="location.reload()">Home</button>
+    </div>
+
+    <div id="drawer">
+        <div onclick="toggleDrawer()" style="text-align:center; color:var(--primary); font-weight:bold; padding-bottom:20px; font-size:1.1rem;">닫기 [X]</div>
+        <div id="exercise_list"></div>
+    </div>
+  </div>
+
+<script type="module">
+  let currentMode="", baseAngle=0, lastFiltered=0, lastStableAngle=0, lastStableTime=Date.now(), isSettled=false;
+  let alpha = 0.15, isFront = false;
+
+  // 구글 로그인 핸들러
+  window.onLogin = (res) => { showMenu(); };
+  window.showMenu = () => { 
+    document.getElementById('login_screen').style.display='none'; 
+    document.getElementById('menu_screen').style.display='flex'; 
+  };
+
+  // 측정 시작 설정
+  window.startEngine = (m) => {
+    currentMode=m; isSettled=false; lastFiltered=0;
+    document.getElementById('menu_screen').style.display='none';
+    document.getElementById('measure_screen').style.display='block';
+    
+    const norms = { 
+        neck: "Flex 45° / Ext 45°", trunk: "Flex 80°", shoulder_fe: "Flex 180°", 
+        shoulder_abd: "Abd 180°", shoulder_horiz: "Add 135° / Abd 45°",
+        hip_abd: "Abd 45° / Add 20°", hip_fe: "Flex 120°", knee_fe: "Flex 135°", ankle: "DF 20° / PF 50°" 
+    };
+    document.getElementById('ref_info').innerText = `Normal Range: ${norms[m] || '--'}`;
+    
+    loadExerciseData(m);
+    setupCamera();
+  };
+
+  window.flipCamera = () => { isFront = !isFront; setupCamera(); };
+  window.resetAngle = () => { baseAngle = lastFiltered; isSettled = false; document.getElementById('status_badge').innerText="Measuring..."; };
+  window.toggleDrawer = () => {
+    const d = document.getElementById('drawer');
+    d.style.transform = d.style.transform === "translateY(0%)" ? "translateY(100%)" : "translateY(0%)";
+  };
+
+  // 운동 목록 데이터 매칭
+  function loadExerciseData(m) {
+    const cont = document.getElementById('exercise_list');
+    const db = { 
+        hip_abd: [{t:"고관절 가동성 증진 운동", id:"Xv7tA6D0p80"}],
+        shoulder_fe: [{t:"어깨 굴곡 각도 회복", id:"o43PBLeEVCg"}],
+        neck: [{t:"목 가동범위 스트레칭", id:"8yMREH3DovM"}],
+        knee_fe: [{t:"무릎 굴절 가동성 회복", id:"NX2f9Zs9x2Q"}]
+    };
+    const list = db[m] || db.shoulder_fe;
+    cont.innerHTML = list.map(v => `
+      <div class="v-card" onclick="window.open('https://youtu.be/${v.id}')">
+        <img src="https://img.youtube.com/vi/${v.id}/mqdefault.jpg">
+        <div><strong>${v.t}</strong><br><small style="color:var(--primary)">YouTube에서 보기</small></div>
+      </div>`).join('');
+  }
+
+  const video = document.getElementById('input_video');
+  const canvas = document.getElementById('output_canvas');
+  const ctx = canvas.getContext('2d');
+  
+  const pose = new Pose({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+  pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+
+  pose.onResults((results) => {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    ctx.save(); ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if(isFront) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+    
+    if (results.poseLandmarks) {
+      const lm = results.poseLandmarks;
+      const isRight = lm[12].visibility > lm[11].visibility;
+      let p1, p2, p3;
+
+      // [핵심] 모든 부위 포인트 추적 로직 (하지 벌림/모음 포함 완벽 복구)
+      if(currentMode==='neck'){ p1=lm[11]; p2=lm[7]; p3=lm[1]; }
+      else if(currentMode==='trunk'){ p1=lm[11]; p2=lm[23]; p3=lm[25]; }
+      else if(currentMode==='hip_abd'){ p1=isRight?lm[11]:lm[12]; p2=isRight?lm[24]:lm[23]; p3=isRight?lm[26]:lm[25]; }
+      else if(currentMode.includes('shoulder')){
+          if(currentMode==='shoulder_abd'||currentMode==='shoulder_horiz'){ p1=isRight?lm[11]:lm[12]; p2=isRight?lm[12]:lm[11]; p3=isRight?lm[14]:lm[13]; }
+          else { p1=isRight?lm[24]:lm[23]; p2=isRight?lm[12]:lm[11]; p3=isRight?lm[14]:lm[13]; }
+      } else if(currentMode==='knee_fe'){ p1=isRight?lm[24]:lm[23]; p2=isRight?lm[26]:lm[25]; p3=isRight?lm[28]:lm[27]; }
+      else if(currentMode==='hip_fe'){ p1=isRight?lm[12]:lm[11]; p2=isRight?lm[24]:lm[23]; p3=isRight?lm[26]:lm[25]; }
+      else if(currentMode==='ankle'){ p1=isRight?lm[26]:lm[25]; p2=isRight?lm[28]:lm[27]; p3=isRight?lm[32]:lm[31]; }
+      else { p1=isRight?lm[24]:lm[23]; p2=isRight?lm[12]:lm[11]; p3=isRight?lm[14]:lm[13]; }
+
+      // 벡터 각도 계산
+      const v1={x:p1.x-p2.x, y:p1.y-p2.y}, v2={x:p3.x-p2.x, y:p3.y-p2.y};
+      const rawAngle = Math.acos((v1.x*v2.x+v1.y*v2.y)/(Math.sqrt(v1.x**2+v1.y**2)*Math.sqrt(v2.x**2+v2.y**2)))*(180/Math.PI);
+      
+      // [오차 보정] 측정자 키에 따른 시차 왜곡 보정
+      const userH = parseFloat(document.getElementById('user_height').value) || 170;
+      const heightCorrection = (userH - 170) * 0.045; 
+      
+      lastFiltered = Math.round(alpha*(rawAngle + heightCorrection)+(1-alpha)*lastFiltered);
+      let displayAngle = Math.abs(lastFiltered - baseAngle);
+      if(displayAngle > 180) displayAngle = 360 - displayAngle;
+      
+      document.getElementById('angle_display').innerText = `${displayAngle}°`;
+
+      // 안정화 판정 (1.5초)
+      if (Math.abs(displayAngle - lastStableAngle) < 3){
+        if (Date.now() - lastStableTime > 1500 && displayAngle > 10 && !isSettled){
+          isSettled = true;
+          const normalLimit = 40; 
+          const badge = document.getElementById('status_badge');
+          badge.innerText = displayAngle >= normalLimit ? "✅ Normal" : "⚠️ Limited";
+          badge.style.color = displayAngle >= normalLimit ? "#00ff00" : "#ff4444";
+        }
+      } else { lastStableAngle = displayAngle; lastStableTime = Date.now(); if(!isSettled)document.getElementById('status_badge').innerText="Measuring..."; }
+      
+      // 관절 연결선 그리기
+      ctx.setLineDash([8, 8]); ctx.strokeStyle="rgba(255,255,255,0.8)"; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(p1.x*canvas.width, p1.y*canvas.height); ctx.lineTo(p2.x*canvas.width, p2.y*canvas.height); ctx.lineTo(p3.x*canvas.width, p3.y*canvas.height); ctx.stroke();
+    }
+    ctx.restore();
+  });
+
+  let cameraInstance = null;
+  function setupCamera() {
+    if(cameraInstance) cameraInstance.stop();
+    cameraInstance = new Camera(video, { onFrame: async() => { await pose.send({image:video}); }, facingMode: isFront?'user':'environment', width:1280, height:720 });
+    cameraInstance.start();
+  }
+</script>
+</body>
+</html>
