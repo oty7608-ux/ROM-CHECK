@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Smart PT ROM Analyzer</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  
+  <style>
+    body { font-family: sans-serif; margin: 0; background-color: #000; color: #fff; overflow: hidden; }
+    #login_screen, #menu_screen { position: fixed; width: 100vw; height: 100vh; background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+    #menu_screen { display: none; }
+    .btn { background: #34495e; color: #fff; padding: 20px; margin: 10px; border-radius: 12px; border: none; font-size: 1.2rem; width: 85%; max-width: 400px; }
+
+    #measure_screen { display: none; width: 100vw; height: 100vh; position: relative; }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+    
+    #overlay_ui { position: absolute; top: 0; left: 0; width: 100%; padding: 20px; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+    #angle_display { font-size: 80px; color: #00ff00; font-weight: bold; }
+    #status_badge { font-size: 24px; padding: 10px 20px; border-radius: 30px; background: rgba(0,0,0,0.6); margin-top: 10px; min-height: 40px; }
+    
+    #recommend_video { position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); width: 90%; display: none; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 15px; }
+    .back-btn { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); padding: 15px 40px; border-radius: 30px; background: #fff; color: #000; border: none; font-weight: bold; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <div id="login_screen">
+    <h2>AI ROM Analyzer</h2>
+    <div id="g_id_onload" data-client_id="534435432285-5p1cs4c0hufivp300eahdnf7fs15i1pa.apps.googleusercontent.com" data-callback="handleCredentialResponse"></div>
+    <div class="g_id_signin" data-type="standard"></div>
+  </div>
+
+  <div id="menu_screen">
+    <h3 id="welcome_msg"></h3>
+    <button class="btn" onclick="start('shoulder')">Shoulder Flexion</button>
+    <button class="btn" onclick="start('knee')">Knee Flexion</button>
+  </div>
+
+  <div id="measure_screen">
+    <video id="input_video" style="display:none;" playsinline></video>
+    <canvas id="output_canvas"></canvas>
+    <div id="overlay_ui">
+      <div id="angle_display">0°</div>
+      <div id="status_badge">측정 중...</div>
+    </div>
+    <div id="recommend_video"></div>
+    <button class="back-btn" onclick="location.reload()">다시 측정</button>
+  </div>
+
+<script type="module">
+  const videoElement = document.getElementById('input_video');
+  const canvasElement = document.getElementById('output_canvas');
+  const canvasCtx = canvasElement.getContext('2d');
+  const statusBadge = document.getElementById('status_badge');
+  const recommendVideo = document.getElementById('recommend_video');
+  const angleDisplay = document.getElementById('angle_display');
+  
+  let mode = "";
+  let lastAngle = 0;
+  let lastTime = Date.now();
+  let isSettled = false;
+  let videoPlayed = false;
+
+  window.handleCredentialResponse = (response) => {
+    const payload = JSON.parse(atob(response.credential.split('.')[1]));
+    document.getElementById('welcome_msg').innerText = `${payload.name}님 환영합니다!`;
+    document.getElementById('login_screen').style.display = 'none';
+    document.getElementById('menu_screen').style.display = 'flex';
+  };
+
+  window.start = (part) => {
+    mode = part;
+    document.getElementById('menu_screen').style.display = 'none';
+    document.getElementById('measure_screen').style.display = 'block';
+    camera.start();
+  };
+
+  function getAngle(p1, p2, p3) {
+    const r = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
+    let a = Math.abs(r * 180 / Math.PI);
+    return a > 180 ? 360 - a : Math.round(a);
+  }
+
+  function onResults(results) {
+    canvasElement.width = window.innerWidth;
+    canvasElement.height = window.innerHeight;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.poseLandmarks) {
+      const lm = results.poseLandmarks;
+      const isRight = lm[12].visibility > lm[11].visibility;
+      const p1 = isRight ? lm[24] : lm[23];
+      const p2 = isRight ? lm[12] : lm[11];
+      const p3 = isRight ? lm[14] : lm[13];
+
+      const currentAngle = getAngle(p1, p2, p3);
+      angleDisplay.innerText = `${currentAngle}°`;
+
+      // [핵심] 정지 감지 로직 (1초 동안 ±2도 변화 없을 때)
+      if (Math.abs(currentAngle - lastAngle) < 2) {
+        if (Date.now() - lastTime > 1000 && currentAngle > 30) {
+          isSettled = true; // 판정 확정
+        }
+      } else {
+        lastAngle = currentAngle;
+        lastTime = Date.now();
+        if(!videoPlayed) isSettled = false; // 움직이면 판정 초기화 (이미 영상 떴으면 고정)
+      }
+
+      // 판정이 확정되었을 때만 문구와 영상 출력
+      if (isSettled) {
+        if (currentAngle >= 165) {
+          statusBadge.innerText = "✅ 정상 (Normal)";
+          statusBadge.style.color = "#00ff00";
+        } else {
+          statusBadge.innerText = "⚠️ 제한됨 (Limited)";
+          statusBadge.style.color = "#ff4444";
+          if (!videoPlayed) {
+            recommendVideo.style.display = "block";
+            recommendVideo.innerHTML = `<iframe width="100%" height="200" src="https://www.youtube.com/embed/S_8n_k6U2C4?autoplay=1" frameborder="0" allow="autoplay" allowfullscreen></iframe>`;
+            videoPlayed = true;
+          }
+        }
+      } else {
+        statusBadge.innerText = "측정 중...";
+        statusBadge.style.color = "#fff";
+      }
+
+      // 점선 각도기 그리기
+      canvasCtx.setLineDash([5, 5]);
+      canvasCtx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+      canvasCtx.beginPath();
+      canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+      canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+      canvasCtx.lineTo(p3.x * canvasElement.width, p3.y * canvasElement.height);
+      canvasCtx.stroke();
