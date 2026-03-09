@@ -2,55 +2,76 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>AI 종합 관절 ROM 측정기</title>
+  <title>AI 스마트 PT 매니저</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
   
   <style>
-    body { font-family: 'Malgun Gothic', sans-serif; text-align: center; background-color: #f4f7f6; margin: 0; }
-    #video_container { position: relative; display: inline-block; margin-top: 20px; }
-    canvas { background-color: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+    body { font-family: 'Malgun Gothic', sans-serif; margin: 0; background-color: #1a1a1a; color: white; overflow-x: hidden; }
     
-    /* 각도 표시 레이블 스타일 */
-    .angle-label {
-      position: absolute; font-size: 18px; font-weight: bold; background: rgba(0,0,0,0.6);
-      color: white; padding: 5px 10px; border-radius: 5px; pointer-events: none;
-    }
+    /* 1. 로그인 화면 */
+    #login_screen { position: fixed; width: 100%; height: 100%; background: #222; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+    .google-btn { background: white; color: #444; padding: 15px 30px; border-radius: 5px; cursor: pointer; font-weight: bold; border: none; font-size: 18px; }
+
+    /* 2. 메인 메뉴 화면 */
+    #menu_screen { display: none; padding: 50px; text-align: center; }
+    .menu-btn { background: #3498db; color: white; padding: 20px 40px; margin: 10px; border: none; border-radius: 10px; font-size: 20px; cursor: pointer; }
+
+    /* 3. 측정 화면 */
+    #measure_screen { display: none; position: relative; text-align: center; }
+    canvas { width: 90vw; height: auto; border-radius: 15px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    #angle_overlay { position: absolute; top: 30px; right: 10% ; font-size: 60px; color: #00ff00; font-weight: bold; }
     
-    #result_panel { max-width: 700px; margin: 20px auto; padding: 20px; background: white; border-radius: 15px; }
-    .status-box { font-size: 20px; font-weight: bold; margin-bottom: 10px; }
-    .danger { color: #e74c3c; }
-    .normal { color: #27ae60; }
+    #video_box { margin-top: 20px; width: 90vw; margin-left: auto; margin-right: auto; }
+    .back-btn { position: absolute; top: 20px; left: 20px; background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
   </style>
 </head>
 
 <body>
-  <h1>AI 종합 관절 측정 시스템</h1>
 
-  <div id="video_container">
-    <video id="input_video" style="display:none;"></video>
-    <canvas id="output_canvas" width="800" height="600"></canvas>
-    
-    <div id="shoulder_label" class="angle-label" style="top: 20px; left: 20px;">어깨: 0°</div>
-    <div id="elbow_label" class="angle-label" style="top: 60px; left: 20px;">팔꿈치: 0°</div>
-    <div id="hip_label" class="angle-label" style="top: 100px; left: 20px;">고관절: 0°</div>
-    <div id="knee_label" class="angle-label" style="top: 140px; left: 20px;">무릎: 0°</div>
+  <div id="login_screen">
+    <h1>AI 물리치료 측정기</h1>
+    <p>본인 확인을 위해 로그인해 주세요</p>
+    <button class="google-btn" onclick="showMenu()">Google 계정으로 로그인</button>
   </div>
 
-  <div id="result_panel">
-    <div id="status_msg" class="status-box">측정하고 싶은 부위를 움직여보세요.</div>
-    <div id="video_area"></div>
+  <div id="menu_screen">
+    <h2>측정하고 싶은 부위를 선택하세요</h2>
+    <button class="menu-btn" onclick="startMeasure('shoulder')">어깨 (Shoulder)</button>
+    <button class="menu-btn" onclick="startMeasure('knee')">무릎 (Knee)</button>
+    <button class="menu-btn" onclick="startMeasure('elbow')">팔꿈치 (Elbow)</button>
+  </div>
+
+  <div id="measure_screen">
+    <button class="back-btn" onclick="goBack()">↩ 뒤로가기</button>
+    <div id="video_container">
+      <video id="input_video" style="display:none;"></video>
+      <canvas id="output_canvas"></canvas>
+      <div id="angle_overlay">0°</div>
+    </div>
+    <div id="video_box"></div>
   </div>
 
   <script type="module">
-    const videoElement = document.getElementById('input_video');
-    const canvasElement = document.getElementById('output_canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-    const videoArea = document.getElementById('video_area');
-    const statusMsg = document.getElementById('status_msg');
+    const loginScreen = document.getElementById('login_screen');
+    const menuScreen = document.getElementById('menu_screen');
+    const measureScreen = document.getElementById('measure_screen');
+    const angleOverlay = document.getElementById('angle_overlay');
+    const videoBox = document.getElementById('video_box');
+    
+    let currentPart = "";
+    let videoPlaying = false;
 
-    // 3개 점 사이의 각도를 구하는 함수
+    window.showMenu = () => { loginScreen.style.display = 'none'; menuScreen.style.display = 'block'; };
+    window.goBack = () => { location.reload(); };
+    window.startMeasure = (part) => {
+      currentPart = part;
+      menuScreen.style.display = 'none';
+      measureScreen.style.display = 'block';
+      camera.start();
+    };
+
     function calculateAngle(p1, p2, p3) {
       const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
       let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -58,14 +79,9 @@
       return Math.round(angle);
     }
 
-    let currentVideoId = "";
-    function showExercise(id, partName) {
-      if (currentVideoId !== id) {
-        currentVideoId = id;
-        statusMsg.innerHTML = `<span class="danger">⚠️ ${partName} 가동범위가 좁습니다. 재활 영상을 추천합니다.</span>`;
-        videoArea.innerHTML = `<iframe width="100%" height="315" src="https://www.youtube.com/embed/${id}" allowfullscreen></iframe>`;
-      }
-    }
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
 
     function onResults(results) {
       canvasCtx.save();
@@ -73,41 +89,33 @@
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
       if (results.poseLandmarks) {
-        const landmarks = results.poseLandmarks;
+        const lm = results.poseLandmarks;
+        let angle = 0;
+        let partName = "";
 
-        // 오른쪽 부위 점 번호 (12:어깨, 14:팔꿈치, 16:손목, 24:고관절, 26:무릎, 28:발목)
-        const shoulder = landmarks[12];
-        const elbow = landmarks[14];
-        const wrist = landmarks[16];
-        const hip = landmarks[24];
-        const knee = landmarks[26];
-        const ankle = landmarks[28];
-
-        // 1. 어깨 각도 (골반-어깨-팔꿈치)
-        const sAngle = calculateAngle(hip, shoulder, elbow);
-        document.getElementById('shoulder_label').innerText = `어깨: ${sAngle}°`;
-
-        // 2. 팔꿈치 각도 (어깨-팔꿈치-손목)
-        const eAngle = calculateAngle(shoulder, elbow, wrist);
-        document.getElementById('elbow_label').innerText = `팔꿈치: ${eAngle}°`;
-
-        // 3. 고관절 각도 (어깨-고관절-무릎)
-        const hAngle = calculateAngle(shoulder, hip, knee);
-        document.getElementById('hip_label').innerText = `고관절: ${hAngle}°`;
-
-        // 4. 무릎 각도 (고관절-무릎-발목)
-        const kAngle = calculateAngle(hip, knee, ankle);
-        document.getElementById('knee_label').innerText = `무릎: ${kAngle}°`;
-
-        // 분석 로직 (예시: 어깨가 170도 미만일 때 영상 추천)
-        if (sAngle < 150 && sAngle > 40) {
-          showExercise("S_8n_k6U2C4", "어깨");
-        } else if (kAngle < 140 && kAngle > 40) {
-          showExercise("nYpX2vI7Q9Y", "무릎");
+        if (currentPart === 'shoulder') {
+          angle = calculateAngle(lm[24], lm[12], lm[14]); // 골반-어깨-팔꿈치
+          partName = "어깨";
+        } else if (currentPart === 'knee') {
+          angle = calculateAngle(lm[24], lm[26], lm[28]); // 골반-무릎-발목
+          partName = "무릎";
+        } else if (currentPart === 'elbow') {
+          angle = calculateAngle(lm[12], lm[14], lm[16]); // 어깨-팔꿈치-손목
+          partName = "팔꿈치";
         }
 
-        drawConnectors(canvasCtx, landmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
-        drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+        angleOverlay.innerText = `${angle}°`;
+
+        // 분석 로직 (어깨 기준 170도 미만 시 영상 추천)
+        if (currentPart === 'shoulder' && angle < 170 && angle > 40) {
+          if(!videoPlaying) {
+            videoBox.innerHTML = `<h3>⚠️ ${partName} 스트레칭이 필요합니다!</h3><iframe width="100%" height="450" src="https://www.youtube.com/embed/S_8n_k6U2C4?autoplay=1" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+            videoPlaying = true;
+          }
+        }
+
+        drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+        drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2});
       }
       canvasCtx.restore();
     }
@@ -118,9 +126,8 @@
 
     const camera = new Camera(videoElement, {
       onFrame: async () => { await pose.send({image: videoElement}); },
-      width: 800, height: 600
+      width: 1280, height: 720
     });
-    camera.start();
   </script>
 </body>
 </html>
