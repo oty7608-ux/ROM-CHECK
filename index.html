@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>PT ROM Test</title>
+  
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  
+  <style>
+    :root { 
+      --safe-top: env(safe-area-inset-top, 20px); 
+      --safe-bottom: env(safe-area-inset-bottom, 20px); 
+      --primary: #00ff00; 
+      --dit-blue: #004a98;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background: #000; color: #fff; overflow: hidden; height: 100dvh; width: 100vw; position: fixed; }
+    
+    .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; z-index: 100; padding: var(--safe-top) 5% var(--safe-bottom); background: #111; overflow-y: auto; }
+    .main-title { font-size: clamp(2.2rem, 10vw, 3.2rem); font-weight: 900; margin-bottom: 30px; letter-spacing: -2px; }
+
+    #menu_screen { display: none; padding-top: calc(var(--safe-top) + 20px); }
+    .welcome-msg { color: var(--primary); font-size: 1.6rem; font-weight: bold; margin-bottom: 25px; width: 100%; max-width: 450px; }
+    
+    .input-group { width: 100%; max-width: 450px; margin-bottom: 20px; }
+    .input-group label { font-size: 0.85rem; color: #888; display: block; margin-bottom: 8px; }
+    .height-input { width: 100%; padding: 18px; border-radius: 15px; border: 1px solid #333; background: #222; color: #fff; font-size: 1.1rem; }
+
+    .btn { background: var(--dit-blue); color: #fff; padding: clamp(16px, 4vh, 20px); margin: 6px 0; border-radius: 20px; border: none; font-size: 1.1rem; width: 100%; max-width: 450px; font-weight: 700; cursor: pointer; }
+    .btn:active { transform: scale(0.97); }
+    .category-title { color: #666; font-size: 0.85rem; margin: 25px 0 10px 0; width: 100%; max-width: 450px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #222; padding-bottom: 6px; }
+
+    #measure_screen { display: none; width: 100vw; height: 100dvh; position: relative; background: #000; }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+    #overlay_ui { position: absolute; top: var(--safe-top); right: 5%; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+    #angle_display { font-size: clamp(75px, 20vw, 110px); color: var(--primary); font-weight: 900; text-shadow: 2px 2px 30px #000; line-height: 0.8; }
+    #status_badge { font-size: 18px; font-weight: bold; margin-top: 15px; padding: 10px 20px; border-radius: 12px; background: rgba(0,0,0,0.85); min-width: 160px; text-align: center; border: 1px solid rgba(255,255,255,0.2); }
+
+    #control_bar { position: absolute; bottom: calc(var(--safe-bottom) + 15px); width: 100%; display: flex; justify-content: center; gap: 8px; padding: 0 15px; flex-wrap: wrap; }
+    .tool-btn { flex: 1 1 20%; max-width: 100px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 16px 5px; border-radius: 20px; backdrop-filter: blur(15px); font-size: 12px; font-weight: bold; }
+
+    #drawer { position: fixed; bottom: 0; left: 0; width: 100%; background: #1a1a1a; border-radius: 30px 30px 0 0; padding: 30px 20px var(--safe-bottom); transform: translateY(100%); transition: 0.5s; z-index: 200; max-height: 75vh; overflow-y: auto; }
+    .v-card { background: #262626; margin-bottom: 15px; padding: 15px; border-radius: 15px; display: flex; align-items: center; border: 1px solid #333; }
+    .v-card img { width: 90px; border-radius: 8px; margin-right: 18px; }
+  </style>
+</head>
+<body>
+
+  <div id="login_screen" class="screen" style="justify-content: center;">
+    <h1 class="main-title">PT ROM Test</h1>
+    <div id="g_id_onload" 
+         data-client_id="534435432285-5p1cs4c0hufivp300eahdnf7fs15i1pa.apps.googleusercontent.com" 
+         data-callback="onLogin"
+         data-auto_prompt="false"></div>
+    <div class="g_id_signin" data-type="standard"></div>
+    <button class="btn" style="background:#444; margin-top:25px;" onclick="showMenu()">로그인 없이 바로 시작</button>
+  </div>
+
+  <div id="menu_screen" class="screen">
+    <h3 class="welcome-msg">환영합니다!</h3>
+    <div class="input-group">
+      <label>측정자 키 (cm) - 오차 자동 보정</label>
+      <input type="number" id="user_height" class="height-input" value="175">
+    </div>
+
+    <div class="category-title">Upper Body & Spine</div>
+    <button class="btn" onclick="startROM('neck')">Neck Flex/Ext</button>
+    <button class="btn" onclick="startROM('trunk')">Trunk Flex/Ext</button>
+    <button class="btn" onclick="startROM('shoulder_fe')">Shoulder Flex/Ext</button>
+    <button class="btn" onclick="startROM('shoulder_abd')">Shoulder Abd/Add</button>
+    <button class="btn" onclick="startROM('shoulder_horiz')">Shoulder Horizontal</button>
+
+    <div class="category-title">Lower Body (하지)</div>
+    <button class="btn" style="background:#e67e22;" onclick="startROM('hip_abd')">Hip Abduction/Adduction</button>
+    <button class="btn" onclick="startROM('hip_fe')">Hip Flex/Ext</button>
+    <button class="btn" onclick="startROM('knee_fe')">Knee Flex/Ext</button>
+    <button class="btn" onclick="startROM('ankle')">Ankle DF/PF</button>
+    
+    <button class="btn" style="background:#555; margin-top:30px; margin-bottom: 50px;" onclick="location.reload()">새로고침</button>
+  </div>
+
+  <div id="measure_screen">
+    <video id="input_v" style="display:none;" playsinline></video>
+    <canvas id="output_c"></canvas>
+    <div id="overlay_ui">
+      <div id="angle_display">0°</div>
+      <div id="status_badge">Measuring...</div>
+      <div id="ref_info" style="font-size:12px; color:#aaa; margin-top:10px;">Normal: --</div>
+    </div>
+    <div id="control_bar">
+      <button class="tool-btn" style="background:#e67e22;" onclick="resetAngle()">📐 Reset</button>
+      <button class="tool-btn" onclick="flipCam()">🔄 전환</button>
+      <button class="tool-btn" onclick="toggleDrawer()">📺 운동</button>
+      <button class="tool-btn" onclick="location.reload()">Home</button>
+    </div>
+    <div id="drawer">
+        <div onclick="toggleDrawer()" style="text-align:center; color:var(--primary); font-weight:bold; padding-bottom:20px;">닫기 [X]</div>
+        <div id="video_list"></div>
+    </div>
+  </div>
+
+<script type="module">
+  let mode="", base=0, filtered=0, lastStable=0, stableTime=Date.now(), settled=false;
+  let alpha=0.15, isFront=false, cameraInstance=null;
+
+  window.onLogin = (res) => { if(res) showMenu(); };
+  window.showMenu = () => { 
+    document.getElementById('login_screen').style.display='none'; 
+    document.getElementById('menu_screen').style.display='flex'; 
+  };
+
+  window.startROM = (m) => {
+    mode=m; settled=false; filtered=0;
+    document.getElementById('menu_screen').style.display='none';
+    document.getElementById('measure_screen').style.display='block';
+    const norms = { neck:"45°", trunk:"80°", shoulder_fe:"180°", shoulder_abd:"180°", shoulder_horiz:"135°", hip_abd:"45°", hip_fe:"120°", knee_fe:"135°", ankle:"20°" };
+    document.getElementById('ref_info').innerText = `Normal Range: ${norms[m] || '--'}`;
+    loadExercises(m);
+    initCam();
+  };
+
+  window.flipCam = () => { isFront = !isFront; initCam(); };
+  window.resetAngle = () => { base = filtered; settled = false; };
+  window.toggleDrawer = () => {
+    const d = document.getElementById('drawer');
+    d.style.transform = d.style.transform === "translateY(0%)" ? "translateY(100%)" : "translateY(0%)";
+  };
+
+  // 유튜브 목록 확실하게 고정 로드
+  function loadExercises(m) {
+    const cont = document.getElementById('video_list');
+    const videoData = { 
+      neck: [{t:"목 가동범위 스트레칭", id:"8yMREH3DovM"}],
+      trunk: [{t:"허리 가동성 강화", id:"qB2O8pU7f5c"}],
+      shoulder_fe: [{t:"어깨 굴곡 회복 운동", id:"o43PBLeEVCg"}],
+      shoulder_abd: [{t:"어깨 외전 운동", id:"wlKbstXt5ck"}],
+      shoulder_horiz: [{t:"어깨 수평 가동 운동", id:"V9pEiswY7v4"}],
+      hip_abd: [{t:"고관절 벌림/모음 운동", id:"Xv7tA6D0p80"}],
+      hip_fe: [{t:"고관절 가동성 회복", id:"5K_H-eL-E-o"}],
+      knee_fe: [{t:"무릎 굴곡 각도 회복", id:"NX2f9Zs9x2Q"}],
+      ankle: [{t:"발목 유연성 스트레칭", id:"_6k0ZkG_o3o"}]
+    };
+    const list = videoData[m] || videoData.shoulder_fe;
+    cont.innerHTML = list.map(v => `
+      <div class="v-card" onclick="window.open('https://youtu.be/${v.id}')">
+        <img src="https://img.youtube.com/vi/${v.id}/mqdefault.jpg">
+        <div><strong>${v.t}</strong><br><small style="color:var(--primary)">YouTube 열기</small></div>
+      </div>`).join('');
+  }
+
+  const v=document.getElementById('input_v'), c=document.getElementById('output_c'), ctx=c.getContext('2d');
+  const pose = new Pose({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+  pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+
+  pose.onResults((res) => {
+    c.width = window.innerWidth; c.height = window.innerHeight;
+    ctx.save(); ctx.clearRect(0,0,c.width,c.height);
+    if(isFront) { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(res.image, 0, 0, c.width, c.height);
+    if (res.poseLandmarks) {
+      const lm = res.poseLandmarks;
+      const isR = lm[12].visibility > lm[11].visibility;
+      let p1, p2, p3;
+      if(mode==='neck'){ p1=lm[11]; p2=lm[7]; p3=lm[1]; }
+      else if(mode==='trunk'){ p1=lm[11]; p2=lm[23]; p3=lm[25]; }
+      else if(mode==='hip_abd'){ p1=isR?lm[11]:lm[12]; p2=isR?lm[24]:lm[23]; p3=isR?lm[26]:lm[25]; }
+      else if(mode.includes('shoulder')){
+          if(mode==='shoulder_abd'||mode==='shoulder_horiz'){ p1=isR?lm[11]:lm[12]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13]; }
+          else { p1=isR?lm[24]:lm[23]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13]; }
+      } else if(mode==='knee_fe'){ p1=isR?lm[24]:lm[23]; p2=isR?lm[26]:lm[25]; p3=isR?lm[28]:lm[27]; }
+      else if(mode==='hip_fe'){ p1=isR?lm[12]:lm[11]; p2=isR?lm[24]:lm[23]; p3=isR?lm[26]:lm[25]; }
+      else if(mode==='ankle'){ p1=isR?lm[26]:lm[25]; p2=isR?lm[28]:lm[27]; p3=isR?lm[32]:lm[31]; }
+      else { p1=isR?lm[24]:lm[23]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13]; }
+      const v1={x:p1.x-p2.x, y:p1.y-p2.y}, v2={x:p3.x-p2.x, y:p3.y-p2.y};
+      const raw = Math.acos((v1.x*v2.x+v1.y*v2.y)/(Math.sqrt(v1.x**2+v1.y**2)*Math.sqrt(v2.x**2+v2.y**2)))*(180/Math.PI);
+      const h = parseFloat(document.getElementById('user_height').value) || 170;
+      const corr = (h - 170) * 0.045; 
+      filtered = Math.round(alpha*(raw + corr)+(1-alpha)*filtered);
+      let disp = Math.abs(filtered - base);
+      if(disp > 180) disp = 360 - disp;
+      document.getElementById('angle_display').innerText = `${disp}°`;
+      if (Math.abs(disp - lastStable) < 3){
+        if (Date.now() - stableTime > 1500 && disp > 10 && !settled){
+          settled = true;
+          document.getElementById('status_badge').innerText = disp >= 40 ? "✅ Normal" : "⚠️ Limited";
+          document.getElementById('status_badge').style.color = disp >= 40 ? "#00ff00" : "#ff4444";
+        }
+      } else { lastStable = disp; stableTime = Date.now(); if(!settled)document.getElementById('status_badge').innerText="Measuring..."; }
+      ctx.setLineDash([8, 8]); ctx.strokeStyle="white"; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(p1.x*c.width, p1.y*c.height); ctx.lineTo(p2.x*c.width, p2.y*c.height); ctx.lineTo(p3.x*c.width, p3.y*c.height); ctx.stroke();
+    }
+    ctx.restore();
+  });
+
+  function initCam() {
+    if(cameraInstance) cameraInstance.stop();
+    cameraInstance = new Camera(v, { onFrame: async() => { await pose.send({image:v}); }, facingMode: isFront?'user':'environment', width:1280, height:720 });
+    cameraInstance.start();
+  }
+</script>
+</body>
+</html>
