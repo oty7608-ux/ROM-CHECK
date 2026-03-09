@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Smart PT ROM Analyzer Pro</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  
+  <style>
+    body { font-family: -apple-system, sans-serif; margin: 0; background: #000; color: #fff; overflow: hidden; height: 100vh; }
+    #login_screen, #menu_screen { position: fixed; width: 100%; height: 100%; background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; padding: env(safe-area-inset-top) 20px env(safe-area-inset-bottom); box-sizing: border-box; }
+    #menu_screen { display: none; overflow-y: auto; justify-content: flex-start; padding-top: 60px; }
+    
+    .btn { background: #2c3e50; color: #fff; padding: 16px; margin: 6px; border-radius: 12px; border: none; font-size: 1rem; width: 100%; max-width: 380px; font-weight: 600; cursor: pointer; }
+    #history_btn { background: #27ae60; display: none; } /* 로그인 시에만 보임 */
+
+    #measure_screen { display: none; width: 100vw; height: 100vh; position: relative; }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+    
+    #overlay_ui { position: absolute; top: env(safe-area-inset-top); left: 0; width: 100%; padding: 15px; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+    #angle_display { font-size: clamp(70px, 18vw, 100px); color: #00ff00; font-weight: 900; text-shadow: 2px 2px 10px #000; }
+    #rom_ref { font-size: 14px; color: #aaa; background: rgba(0,0,0,0.5); padding: 4px 10px; border-radius: 5px; margin-top: 5px; }
+
+    #control_bar { position: absolute; bottom: calc(env(safe-area-inset-bottom) + 20px); width: 100%; display: flex; justify-content: center; gap: 10px; padding: 0 15px; box-sizing: border-box; }
+    .tool-btn { flex: 1; max-width: 120px; background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 14px; border-radius: 25px; backdrop-filter: blur(10px); font-size: 13px; font-weight: bold; }
+
+    #exercise_drawer { position: fixed; bottom: 0; left: 0; width: 100%; background: #1a1a1a; border-radius: 25px 25px 0 0; padding: 25px 20px; transform: translateY(100%); transition: 0.3s; z-index: 200; max-height: 70vh; overflow-y: auto; }
+    .video-item { background: #2c2c2c; margin-bottom: 12px; padding: 12px; border-radius: 12px; display: flex; align-items: center; border: 1px solid #333; }
+    .video-item img { width: 90px; border-radius: 6px; margin-right: 15px; }
+  </style>
+</head>
+<body>
+
+  <div id="login_screen">
+    <h2>Smart PT ROM Pro</h2>
+    <div id="g_id_onload" data-client_id="534435432285-5p1cs4c0hufivp300eahdnf7fs15i1pa.apps.googleusercontent.com" data-callback="handleCredentialResponse"></div>
+    <div class="g_id_signin" data-type="standard"></div>
+    <button class="btn" style="background:#555; margin-top:20px;" onclick="startGuest()">게스트 모드로 시작</button>
+  </div>
+
+  <div id="menu_screen">
+    <h3 id="welcome_msg">측정 항목 선택</h3>
+    <button id="history_btn" class="btn" onclick="showSavedData()">📋 예전 데이터 가져오기</button>
+    <button class="btn" onclick="startMeasure('shoulder')">어깨 (Shoulder)</button>
+    <button class="btn" onclick="startMeasure('knee')">무릎 (Knee)</button>
+    <button class="btn" onclick="startMeasure('hip')">고관절 (Hip)</button>
+    <button class="btn" onclick="startMeasure('ankle')">발목 (Ankle)</button>
+    <div id="history_list" style="width:100%; max-width:380px; margin-top:20px;"></div>
+  </div>
+
+  <div id="measure_screen">
+    <video id="input_video" style="display:none;" playsinline></video>
+    <canvas id="output_canvas"></canvas>
+    <div id="overlay_ui">
+      <div id="angle_display">0°</div>
+      <div id="rom_ref">Normal: --</div>
+    </div>
+    <div id="control_bar">
+      <button class="tool-btn" style="background:#e67e22;" onclick="resetZero()">📐 영점 리셋</button>
+      <button class="tool-btn" onclick="toggleDrawer()">📺 운동 목록</button>
+      <button class="tool-btn" onclick="location.reload()">홈으로</button>
+    </div>
+    <div id="exercise_drawer">
+      <div onclick="toggleDrawer()" style="text-align:center; color:#3498db; font-weight:bold; margin-bottom:20px;">닫기 [X]</div>
+      <h3 style="margin:0 0 20px 0;">가동범위 증진 추천 운동</h3>
+      <div id="video_container"></div>
+    </div>
+  </div>
+
+<script type="module">
+  let mode = "";
+  let baseAngle = 0;
+  let currentRaw = 0;
+  let loggedInUser = null;
+
+  // [1] 데이터 관리 및 로그인
+  window.handleCredentialResponse = (res) => {
+    const payload = JSON.parse(atob(res.credential.split('.')[1]));
+    loggedInUser = payload.sub;
+    document.getElementById('welcome_msg').innerText = `${payload.name}님 실습 도구`;
+    document.getElementById('history_btn').style.display = 'block';
+    startGuest();
+  };
+  window.startGuest = () => {
+    document.getElementById('login_screen').style.display = 'none';
+    document.getElementById('menu_screen').style.display = 'flex';
+  };
+
+  window.showSavedData = () => {
+    const data = JSON.parse(localStorage.getItem('rom_logs_' + loggedInUser) || "[]");
+    const list = document.getElementById('history_list');
+    list.innerHTML = data.length ? data.map(d => `<div style="background:#222; padding:10px; margin-bottom:5px; border-radius:5px; font-size:13px;"><b>${d.date}</b> | ${d.part}: ${d.angle}°</div>`).join('') : "기록이 없습니다.";
+  };
+
+  // [2] 측정 및 영상 제어
+  window.startMeasure = (part) => {
+    mode = part;
+    const refs = {shoulder: "Flex 180° / Ext 60°", knee: "Flex 135° / Ext 0°", hip: "Flex 120° / Ext 20°", ankle: "DF 20° / PF 50°"};
+    document.getElementById('rom_ref').innerText = `Normal: ${refs[part]}`;
+    document.getElementById('menu_screen').style.display = 'none';
+    document.getElementById('measure_screen').style.display = 'block';
+    loadVideoList(part);
+    camera.start();
+  };
+
+  window.resetZero = () => { baseAngle = currentRaw; };
+  window.toggleDrawer = () => {
+    const d = document.getElementById('exercise_drawer');
+    d.style.transform = d.style.transform === "translateY(0%)" ? "translateY(100%)" : "translateY(0%)";
+  };
+
+  function loadVideoList(part) {
+    const cont = document.getElementById('video_container');
+    const videos = {
+      shoulder: [{t:"어깨 굴곡 가동성 회복", id:"o43PBLeEVCg"}, {t:"어깨 스트레칭 가이드", id:"wlKbstXt5ck"}],
+      knee: [{t:"무릎 관절 가동범위 회복", id:"NX2f9Zs9x2Q"}, {t:"수술 후 무릎 운동", id:"usJL_wBnt3w"}]
+    };
+    const list = videos[part] || videos.shoulder;
+    cont.innerHTML = list.map(v => `<div class="video-item" onclick="window.open('https://youtu.be/${v.id}')"><img src="https://img.youtube.com/vi/${v.id}/mqdefault.jpg"><div><strong>${v.t}</strong><br><small style="color:#3498db">유튜브에서 보기</small></div></div>`).join('');
+  }
+
+  // [3] 고정밀 각도 측정 로직 (360도 대응)
+  function getPreciseAngle(p1, p2, p3) {
+    const v1 = {x: p1.x - p2.x, y: p1.y - p2.y};
+    const v2 = {x: p3.x - p2.x, y: p3.y - p2.y};
+    const angle = Math.atan2(v2.y, v2.x) - Math.atan2(v1.y, v1.x);
+    let deg = Math.abs(angle * 180 / Math.PI);
+    return deg > 180 ? 360 - deg : Math.round(deg);
+  }
+
+  const videoElement = document.getElementById('input_video');
+  const canvasCtx = document.getElementById('output_canvas').getContext('2d');
+  const pose = new Pose({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+  pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+  
+  pose.onResults((results) => {
+    const canvas = document.getElementById('output_canvas');
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+    
+    if (results.poseLandmarks) {
+      const lm = results.poseLandmarks;
+      const isR = lm[12].visibility > lm[11].visibility;
+      let p1, p2, p3;
+      if(mode==='shoulder'){p1=isR?lm[24]:lm[23]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13];}
+      else if(mode==='knee'){p1=isR?lm[24]:lm[23]; p2=isR?lm[26]:lm[25]; p3=isR?lm[28]:lm[27];}
+      else {p1=isR?lm[24]:lm[23]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13];}
+      
+      currentRaw = getPreciseAngle(p1, p2, p3);
+      const displayAngle = Math.abs(currentRaw - baseAngle);
+      document.getElementById('angle_display').innerText = `${displayAngle}°`;
+
+      canvasCtx.setLineDash([5, 5]); canvasCtx.strokeStyle = "rgba(0,255,0,0.6)"; canvasCtx.lineWidth = 3;
+      canvasCtx.beginPath(); canvasCtx.moveTo(p1.x*canvas.width, p1.y*canvas.height);
+      canvasCtx.lineTo(p2.x*canvas.width, p2.y*canvas.height);
+      canvasCtx.lineTo(p3.x*canvas.width, p3.y*canvas.height); canvasCtx.stroke();
+    }
+    canvasCtx.restore();
+  });
+
+  const camera = new Camera(videoElement, { onFrame: async () => { await pose.send({image: videoElement}); }, facingMode: 'environment', width: 1280, height: 720 });
+</script>
+</body>
+</html>
