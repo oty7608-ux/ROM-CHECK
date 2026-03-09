@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>DIT Smart ROM Analyzer (Thesis Project)</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  
+  <style>
+    :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); --dit-blue: #004a98; --primary: #00ff00; --success: #27ae60; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, sans-serif; margin: 0; background: #000; color: #fff; overflow: hidden; height: 100vh; width: 100vw; position: fixed; }
+    
+    /* [1] 첫 화면: DIT 로고 배경 및 로그인 */
+    #login_screen { 
+      position: absolute; inset: 0; 
+      background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), 
+                  url('https://www.dit.ac.kr/images/common/logo.png') no-repeat center center; 
+      background-size: 80% auto;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; padding: var(--safe-top) 20px var(--safe-bottom);
+    }
+    .logo-box { background: rgba(255,255,255,0.95); padding: 15px 25px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+
+    /* [2] 메뉴 화면: 카테고리별 분류 */
+    #menu_screen { position: absolute; inset: 0; background: #111; display: none; flex-direction: column; align-items: center; z-index: 100; padding: calc(var(--safe-top) + 40px) 20px var(--safe-bottom); overflow-y: auto; }
+    .btn { background: var(--dit-blue); color: #fff; padding: 18px; margin: 8px 0; border-radius: 15px; border: none; font-size: 1.1rem; width: 100%; max-width: 420px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    .btn:active { transform: scale(0.97); }
+    .category-title { color: #888; font-size: 0.85rem; margin: 20px 0 5px 0; width: 100%; max-width: 420px; text-align: left; text-transform: uppercase; letter-spacing: 1px; }
+
+    /* [3] 가이드 모달 */
+    #guide_modal { position: fixed; inset: 0; background: rgba(0,0,0,0.96); z-index: 300; display: none; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
+    #guide_content { width: 100%; max-width: 400px; text-align: center; background: #1a1a1a; padding: 35px; border-radius: 30px; border: 1px solid #333; }
+    #guide_img_box { width: 160px; height: 160px; margin: 20px auto; background: #000; border-radius: 20px; display: flex; justify-content: center; align-items: center; border: 1px solid var(--dit-blue); }
+    
+    /* [4] 측정 엔진 화면 */
+    #measure_screen { display: none; width: 100vw; height: 100vh; position: relative; }
+    canvas { width: 100%; height: 100%; object-fit: cover; }
+    #overlay_ui { position: absolute; top: calc(var(--safe-top) + 20px); right: 20px; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+    #angle_display { font-size: clamp(80px, 20vw, 110px); color: var(--primary); font-weight: 900; text-shadow: 2px 2px 20px #000; line-height: 0.8; }
+    #status_badge { font-size: 22px; font-weight: bold; margin-top: 15px; padding: 10px 22px; border-radius: 15px; background: rgba(0,0,0,0.85); min-width: 170px; text-align: center; border: 1.5px solid rgba(255,255,255,0.2); }
+    #rom_info { font-size: 14px; color: #aaa; margin-top: 8px; background: rgba(0,0,0,0.5); padding: 4px 10px; border-radius: 5px; }
+
+    #control_bar { position: absolute; bottom: calc(var(--safe-bottom) + 35px); width: 100%; display: flex; justify-content: center; gap: 15px; padding: 0 25px; }
+    .tool-btn { flex: 1; max-width: 135px; background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 16px; border-radius: 40px; backdrop-filter: blur(12px); font-size: 14px; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <div id="login_screen">
+    <div class="logo-box"><img src="https://www.dit.ac.kr/images/common/logo.png" style="width: 210px;"></div>
+    <h2 style="margin-bottom: 5px; letter-spacing: -1px; font-weight: 800;">물리치료학과 논문 프로젝트</h2>
+    <p style="color:#ccc; margin-bottom:45px; font-size: 0.9rem;">AI-Based ROM Analyzer Pro v9.0</p>
+    <div id="g_id_onload" data-client_id="YOUR_CLIENT_ID" data-callback="onLogin"></div>
+    <div class="g_id_signin" data-type="standard"></div>
+    <button class="btn" style="background:#555; margin-top:25px;" onclick="showMenu()">로그인 없이 게스트로 시작</button>
+    <p style="font-size: 11px; color: #666; margin-top: 50px;">© 2026 Dong-eui Institute of Technology</p>
+  </div>
+
+  <div id="menu_screen">
+    <h3 id="welcome" style="margin-bottom:20px;">측정 항목을 선택하세요</h3>
+    <button id="h_btn" class="btn" style="background:var(--success); display:none;" onclick="alert('준비 중입니다')">📋 예전 데이터 가져오기</button>
+    
+    <div class="category-title">어깨 (Shoulder)</div>
+    <button class="btn" onclick="openGuide('shoulder_fe')">어깨 굽힘/폄 (Flex/Ext)</button>
+    <button class="btn" onclick="openGuide('shoulder_abd')">어깨 벌림/모음 (Abd/Add)</button>
+    <button class="btn" style="background:#8e44ad;" onclick="openGuide('shoulder_horiz')">수평 벌림/모음 (Horizontal)</button>
+
+    <div class="category-title">하지 및 기타 (Lower Body & ETC)</div>
+    <button class="btn" onclick="openGuide('knee_fe')">무릎 굽힘/폄</button>
+    <button class="btn" onclick="openGuide('hip_fe')">고관절 굽힘/폄</button>
+    <button class="btn" onclick="openGuide('ankle')">발목 배굴/저굴</button>
+    <button class="btn" style="background:#555;" onclick="location.reload()">새로고침</button>
+  </div>
+
+  <div id="guide_modal">
+    <div id="guide_content">
+      <h2 id="guide_title" style="color:var(--primary); margin-top:0;">측정 가이드</h2>
+      <div id="guide_img_box">
+        <svg width="120" height="120" viewBox="0 0 100 100">
+          <circle cx="50" cy="20" r="8" fill="white"/>
+          <line x1="50" y1="28" x2="50" y2="60" stroke="white" stroke-width="3"/>
+          <line id="guide_arm" x1="50" y1="35" x2="85" y2="35" stroke="var(--primary)" stroke-width="5">
+            <animateTransform attributeName="transform" type="rotate" from="0 50 35" to="-90 50 35" dur="1.2s" repeatCount="indefinite" />
+          </line>
+          <line x1="50" y1="60" x2="35" y2="92" stroke="white" stroke-width="3"/>
+          <line x1="50" y1="60" x2="65" y2="92" stroke="white" stroke-width="3"/>
+        </svg>
+      </div>
+      <p id="guide_text" style="line-height:1.7; color:#ddd; font-size:1rem;"></p>
+      <button class="btn" style="background:var(--success); margin-top:15px;" onclick="startMeasure()">시작하기 (Start)</button>
+      <button class="btn" style="background:#444; font-size:0.85rem;" onclick="startMeasure()">가이드 건너뛰기</button>
+    </div>
+  </div>
+
+  <div id="measure_screen">
+    <video id="v" style="display:none;" playsinline></video>
+    <canvas id="c"></canvas>
+    <div id="overlay_ui">
+      <div id="angle_display">0°</div>
+      <div id="status_badge">움직여주세요</div>
+      <div id="rom_info">Normal: --</div>
+    </div>
+    <div id="control_bar">
+      <button class="tool-btn" style="background:#e67e22;" onclick="zero()">📐 영점 리셋</button>
+      <button class="tool-btn" onclick="location.reload()">홈으로</button>
+    </div>
+  </div>
+
+<script type="module">
+  let mode="", base=0, curr=0, lastA=0, lastT=Date.now(), settled=false;
+  let alpha = 0.2, filtered = 0; // 저역 통과 필터 (손떨림 보정)
+
+  window.onLogin = (res) => { 
+    const payload = JSON.parse(atob(res.credential.split('.')[1]));
+    document.getElementById('welcome').innerText = `${payload.name} 연구원님 측정`;
+    showMenu(); 
+  };
+  window.showMenu = () => { document.getElementById('login_screen').style.display='none'; document.getElementById('menu_screen').style.display='flex'; };
+
+  window.openGuide = (m) => {
+    mode = m;
+    const modal = document.getElementById('guide_modal');
+    const txt = document.getElementById('guide_text');
+    const refs = {
+        shoulder_fe: "<b>어깨 굽힘 측정</b><br>환자를 옆으로 세우고 팔을 올리세요.",
+        shoulder_abd: "<b>어깨 벌림 측정</b><br>환자의 정면에서 팔을 옆으로 벌리세요.",
+        shoulder_horiz: "<b>수평 벌림/모음</b><br>환자 머리 위쪽에서 수평면을 비추세요.",
+        knee_fe: "<b>무릎 측정</b><br>환자를 옆으로 눕히고 무릎을 굽히세요.",
+        ankle: "<b>발목 측정</b><br>복사뼈 측면에서 배굴 각도를 재세요."
+    };
+    txt.innerHTML = refs[m] || "해당 관절의 가동 범위를 측정합니다.";
+    modal.style.display = 'flex';
+  };
+
+  window.startMeasure = () => {
+    document.getElementById('guide_modal').style.display = 'none';
+    document.getElementById('menu_screen').style.display = 'none';
+    document.getElementById('measure_screen').style.display = 'block';
+    const roms = { shoulder_fe: "180°", shoulder_abd: "180°", shoulder_horiz: "Add 135°", knee_fe: "135°", ankle: "DF 20°" };
+    document.getElementById('rom_info').innerText = `Normal: ${roms[mode] || '--'}`;
+    camera.start();
+  };
+
+  window.zero = () => { base = filtered; settled = false; document.getElementById('status_badge').innerText="측정 중..."; };
+
+  const v=document.getElementById('v'), c=document.getElementById('c'), ctx=c.getContext('2d');
+  const pose = new Pose({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+  pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+
+  pose.onResults((res) => {
+    c.width = window.innerWidth; c.height = window.innerHeight;
+    ctx.save(); ctx.clearRect(0,0,c.width,c.height); ctx.drawImage(res.image,0,0,c.width,c.height);
+    if (res.poseLandmarks) {
+      const lm = res.poseLandmarks;
+      const isR = lm[12].visibility > lm[11].visibility;
+      let p1, p2, p3;
+
+      // 정밀 포인트 매칭 로직
+      if(mode.includes('shoulder')){
+          if(mode==='shoulder_abd' || mode==='shoulder_horiz'){ p1=isR?lm[11]:lm[12]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13]; }
+          else { p1=isR?lm[24]:lm[23]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13]; }
+      } else if(mode==='knee_fe'){ p1=isR?lm[24]:lm[23]; p2=isR?lm[26]:lm[25]; p3=isR?lm[28]:lm[27]; }
+      else if(mode==='hip_fe'){ p1=isR?lm[12]:lm[11]; p2=isR?lm[24]:lm[23]; p3=isR?lm[26]:lm[25]; }
+      else if(mode==='ankle'){ p1=isR?lm[26]:lm[25]; p2=isR?lm[28]:lm[27]; p3=isR?lm[32]:lm[31]; }
+      else { p1=isR?lm[24]:lm[23]; p2=isR?lm[12]:lm[11]; p3=isR?lm[14]:lm[13]; }
+
+      const v1={x:p1.x-p2.x, y:p1.y-p2.y}, v2={x:p3.x-p2.x, y:p3.y-p2.y};
+      const raw = Math.acos((v1.x*v2.x + v1.y*v2.y) / (Math.sqrt(v1.x**2+v1.y**2)*Math.sqrt(v2.x**2+v2.y**2))) * (180/Math.PI);
+      
+      filtered = Math.round(alpha * raw + (1 - alpha) * filtered);
+      let disp = Math.abs(filtered - base);
+      document.getElementById('angle_display').innerText = `${disp}°`;
+
+      // 자동 판정 및 손떨림 방지 (1.5초 정지)
+      if (Math.abs(disp - lastA) < 4) {
+        if (Date.now() - lastT > 1500 && disp > 15 && !settled) {
+          settled = true;
+          const ok = disp >= 160; // 간이 기준
+          const b = document.getElementById('status_badge');
+          b.innerText = ok ? "✅ 정상 범위" : "⚠️ 제한됨 (Limited)";
+          b.style.color = ok ? "#00ff00" : "#ff4444";
+        }
+      } else {
+        lastA = disp; lastT = Date.now();
+        if(!settled) document.getElementById('status_badge').innerText = "측정 중...";
+      }
+
+      ctx.setLineDash([8,8]); ctx.strokeStyle="white"; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(p1.x*c.width,p1.y*c.height); ctx.lineTo(p2.x*c.width,p2.y*c.height); ctx.lineTo(p3.x*c.width,p3.y*c.height); ctx.stroke();
+    }
+    ctx.restore();
+  });
+
+  const camera = new Camera(v, { onFrame: async() => { await pose.send({image:v}); }, facingMode:'environment', width:1280, height:720 });
+</script>
+</body>
+</html>
